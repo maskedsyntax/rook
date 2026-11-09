@@ -7,9 +7,12 @@ let package = Package(
     products: [
         .executable(name: "Rook", targets: ["Rook"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/LebJe/TOMLKit", exact: "0.6.0"),
+    ],
     targets: [
-        // Pure logic: geometry, snap math, key parsing, window memory. No AppKit.
-        .target(name: "RookCore"),
+        // Pure logic: geometry, snap math, key parsing, window memory, config. No AppKit.
+        .target(name: "RookCore", dependencies: ["TOMLKit"]),
         // Accessibility API wrappers + display enumeration.
         .target(name: "RookAX", dependencies: ["RookCore"]),
         // Global hotkeys (Carbon) and, later, the mouse event tap.

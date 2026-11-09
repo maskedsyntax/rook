@@ -6,7 +6,7 @@ A fast, native window manager for macOS that sits between Rectangle and a tiling
 
 - [x] Phase 0: app scaffold, menu bar item, Accessibility onboarding, stable signing
 - [x] Phase 1: keyboard snapping (halves, thirds, quarters, maximize, center, grow/shrink), size cycling, restore, move between displays
-- [ ] Phase 2: `~/.config/rook/config.toml` with live reload
+- [x] Phase 2: `~/.config/rook/config.toml` with live reload
 - [ ] Phase 3: drag-to-snap overlay, modifier-drag move/resize
 - [ ] Phase 4: named layouts and auto-placement rules
 - [ ] Phase 5: launch at login, app-compat pass, Homebrew cask
@@ -20,6 +20,21 @@ make install  # copy to /Applications
 ```
 
 On first launch rook asks for Accessibility access and starts working as soon as you turn it on. The Makefile signs with your first "Apple Development" identity so the grant survives rebuilds. Override with `SIGN_IDENTITY=...`.
+
+## Config
+
+On first launch rook writes a commented `~/.config/rook/config.toml` (or `$XDG_CONFIG_HOME/rook/config.toml`). Changes apply as soon as you save. Editors that save atomically and symlinked dotfiles (stow, chezmoi) both work. If the file has an error, rook keeps the last working config, turns the menu bar icon into a ⚠︎, and shows the line and the problem in the menu.
+
+```toml
+gaps = { outer = 8, inner = 8 }   # or: gaps = 8
+almost_maximize = 0.9
+resize_step = 40
+
+[keys]                             # replaces the defaults entirely
+"ctrl+alt+left"  = "left-half"
+"ctrl+alt+r"     = "reload-config"
+"ctrl+alt+up"    = "none"          # disable
+```
 
 ## Default shortcuts
 
