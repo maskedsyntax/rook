@@ -20,6 +20,17 @@
 	<string>14.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>dev.maskedsyntax.rook</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>rook</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 </dict>

@@ -108,18 +108,20 @@ private let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
     @Test func defaults() throws {
         let c = try Config.parse("").get().config
         #expect(c.drag == DragConfig())
-        #expect(c.drag.modifier == [.control, .command])
+        // Mouse features are opt-in.
+        #expect(c.drag.enabled == false)
+        #expect(c.drag.modifier == nil)
     }
 
     @Test func parsesAllFields() throws {
         let c = try Config.parse("""
             [drag]
-            enabled = false
+            enabled = true
             bottom_edge = "half"
             restore_size = false
             modifier = "alt+shift"
             """).get().config
-        #expect(c.drag.enabled == false)
+        #expect(c.drag.enabled == true)
         #expect(c.drag.bottomEdge == .half)
         #expect(c.drag.restoreSizeOnUnsnap == false)
         #expect(c.drag.modifier == [.option, .shift])

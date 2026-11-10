@@ -106,7 +106,27 @@ public final class AXWindow {
         return id
     }
 
+    /// Standard windows of an app, front to back. Includes minimized ones.
+    public static func windows(of pid: pid_t) -> [AXWindow] {
+        let app = AXUIElementCreateApplication(pid)
+        guard let list = AX.copy(app, kAXWindowsAttribute) as? [AXUIElement] else { return [] }
+        return list
+            .map { AXWindow(element: $0, app: app, pid: pid) }
+            .filter { $0.subrole == kAXStandardWindowSubrole }
+    }
+
+    public var title: String? { AX.copy(element, kAXTitleAttribute) as? String }
+
     public var subrole: String? { AX.copy(element, kAXSubroleAttribute) as? String }
+
+    public func unminimize() {
+        if isMinimized { AX.set(element, kAXMinimizedAttribute, kCFBooleanFalse) }
+    }
+
+    /// Raises without activating the app (for stacking several windows).
+    public func raiseOnly() {
+        AXUIElementPerformAction(element, kAXRaiseAction as CFString)
+    }
 
     public var isFullscreen: Bool {
         (AX.copy(element, "AXFullScreen") as? Bool) ?? false

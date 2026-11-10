@@ -60,6 +60,19 @@ final class WindowController {
         }
     }
 
+    /// Places a window for a layout or rule.
+    func place(_ rect: LayoutRect, on window: AXWindow, display: Display) {
+        window.unminimize()
+        switch rect {
+        case .action(let action):
+            perform(action, on: window, display: display)
+        case .unit(let unit):
+            guard !window.isFullscreen, let current = window.frame else { return }
+            let frame = engine.frame(forRaw: unit, in: display.visibleFrame)
+            apply(frame, to: window, area: engine.usableArea(display.visibleFrame), action: nil, id: window.windowID, before: current)
+        }
+    }
+
     /// Where `action` would put a window on `display`, for the drag preview.
     func preview(_ action: SnapAction, display: Display, current: CGRect) -> CGRect? {
         engine.frame(for: action, in: display.visibleFrame, current: current)
@@ -73,8 +86,21 @@ final class WindowController {
         return original.size
     }
 
-    private func apply(_ target: CGRect, to window: AXWindow, area: CGRect, action: SnapAction, id: CGWindowID?, before: CGRect) {
+    private func apply(_ target: CGRect, to window: AXWindow, area: CGRect, action: SnapAction?, id: CGWindowID?, before: CGRect, retry: Bool = true) {
+        let start = window.frame
         var final = window.setFrame(target) ?? target
+
+        // Some apps (Java ones like IntelliJ) cap the size to the display the
+        // window was on and only catch up once the move has landed. If it came
+        // from another display and ended up short, try once more shortly after.
+        if retry, final.width < target.width - 1 || final.height < target.height - 1,
+           let start, DisplayManager.display(for: start)?.id != DisplayManager.display(for: target)?.id {
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(150)) { [weak self] in
+                MainActor.assumeIsolated {
+                    self?.apply(target, to: window, area: area, action: action, id: id, before: before, retry: false)
+                }
+            }
+        }
 
         // The app may have refused the exact size (minimum size, size increments).
         // Keep it flush with the edge it was meant to be on.

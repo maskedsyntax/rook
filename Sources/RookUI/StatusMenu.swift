@@ -23,11 +23,14 @@ public final class StatusMenu: NSObject, NSMenuDelegate {
         public var trusted: Bool
         /// Errors (config not applied, shortcut taken) turn the icon into a warning.
         public var notices: [Notice]
+        /// Layout names, with the shortcut that applies each, if any.
+        public var layouts: [(name: String, shortcut: String?)]
 
-        public init(enabled: Bool, trusted: Bool, notices: [Notice] = []) {
+        public init(enabled: Bool, trusted: Bool, notices: [Notice] = [], layouts: [(name: String, shortcut: String?)] = []) {
             self.enabled = enabled
             self.trusted = trusted
             self.notices = notices
+            self.layouts = layouts
         }
 
         var hasErrors: Bool { notices.contains { $0.kind == .error } }
@@ -38,6 +41,9 @@ public final class StatusMenu: NSObject, NSMenuDelegate {
     public var onOpenConfig: () -> Void = {}
     public var onRevealConfig: () -> Void = {}
     public var onReloadConfig: () -> Void = {}
+    public var onApplyLayout: (String) -> Void = { _ in }
+    public var onSaveLayout: () -> Void = {}
+    public var onOpenLayoutsFolder: () -> Void = {}
     public var onQuit: () -> Void = { NSApp.terminate(nil) }
 
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -96,6 +102,24 @@ public final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(toggle)
 
         menu.addItem(.separator())
+        let layoutsItem = NSMenuItem(title: "Layouts", action: nil, keyEquivalent: "")
+        let layoutsMenu = NSMenu()
+        if s.layouts.isEmpty {
+            layoutsMenu.addItem(disabled("No layouts yet"))
+        }
+        for layout in s.layouts {
+            let title = layout.shortcut.map { "\(layout.name)    \($0)" } ?? layout.name
+            let item = action(title, #selector(applyLayout(_:)))
+            item.representedObject = layout.name
+            layoutsMenu.addItem(item)
+        }
+        layoutsMenu.addItem(.separator())
+        layoutsMenu.addItem(action("Save Current Layout…", #selector(saveLayout), key: "s"))
+        layoutsMenu.addItem(action("Open Layouts Folder", #selector(openLayoutsFolder)))
+        layoutsItem.submenu = layoutsMenu
+        menu.addItem(layoutsItem)
+
+        menu.addItem(.separator())
         menu.addItem(action("Open Config", #selector(openConfig), key: ","))
         menu.addItem(action("Reveal Config in Finder", #selector(revealConfig)))
         menu.addItem(action("Reload Config", #selector(reloadConfig), key: "r"))
@@ -124,4 +148,9 @@ public final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func revealConfig() { onRevealConfig() }
     @objc private func reloadConfig() { onReloadConfig() }
     @objc private func quit() { onQuit() }
+    @objc private func applyLayout(_ sender: NSMenuItem) {
+        if let name = sender.representedObject as? String { onApplyLayout(name) }
+    }
+    @objc private func saveLayout() { onSaveLayout() }
+    @objc private func openLayoutsFolder() { onOpenLayoutsFolder() }
 }

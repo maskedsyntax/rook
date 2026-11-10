@@ -104,13 +104,14 @@ private func failure(_ source: String) -> ConfigError? {
         #expect(r.warnings.first?.line == 1)
     }
 
-    @Test func futureSectionsAreAccepted() throws {
+    @Test func otherSectionsDontWarn() throws {
         let r = try parsed("""
             [drag]
             enabled = true
 
             [[layouts.coding]]
             app = "com.microsoft.VSCode"
+            rect = "maximize"
             """)
         #expect(r.warnings.isEmpty)
     }

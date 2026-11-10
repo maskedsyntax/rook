@@ -2,7 +2,7 @@ import AppKit
 import RookCore
 
 /// A snapshot of one display, in AX coordinates.
-public struct Display: Equatable, Sendable {
+public struct Display: Equatable, Sendable, DisplayDescribing {
     public let id: CGDirectDisplayID
     /// Stable across reboots and replugging; used to match saved layouts.
     public let uuid: String?

@@ -8,7 +8,7 @@ A fast, native window manager for macOS that sits between Rectangle and a tiling
 - [x] Phase 1: keyboard snapping (halves, thirds, quarters, maximize, center, grow/shrink), size cycling, restore, move between displays
 - [x] Phase 2: `~/.config/rook/config.toml` with live reload
 - [x] Phase 3: drag-to-snap overlay, modifier-drag move/resize
-- [ ] Phase 4: named layouts and auto-placement rules
+- [x] Phase 4: named layouts and auto-placement rules
 - [ ] Phase 5: launch at login, app-compat pass, Homebrew cask
 
 ## Build and run
@@ -35,19 +35,67 @@ resize_step = 40
 "ctrl+alt+r"     = "reload-config"
 "ctrl+alt+up"    = "none"          # disable
 
-[drag]
-enabled = true                     # snap by dragging to screen edges
+[drag]                             # mouse features: all off by default
+enabled = false                    # true: snap by dragging to screen edges
 bottom_edge = "thirds"             # "thirds" | "half" | "none"
 restore_size = true                # dragging a snapped window away restores its size
-modifier = "ctrl+cmd"              # hold + drag to move, + right-drag to resize; "none" to disable
+modifier = "none"                  # e.g. "ctrl+cmd": hold + drag to move, + right-drag to resize
 ```
 
-## Mouse
+## Mouse (opt-in)
+
+Off by default. With `[drag]` left alone rook never installs a mouse event tap at all. Turn on either part in `[drag]`:
 
 - **Drag to snap:** drag a window by its title bar to a screen edge. Left/right = half, corners = quarter, top = maximize, bottom = thirds by cursor position. A preview shows where it will land; let go to snap it. Edges shared with another monitor are ignored, so moving a window between monitors doesn't trigger a snap.
 - **Unsnap:** dragging a snapped window away gives it back its earlier size, still under the cursor.
 - **Modifier-drag:** hold `ctrl+cmd` and drag anywhere in a window to move it, or right-drag to resize from the nearest corner. Screen edges snap here too.
 - macOS 15+ has its own edge tiling. The two fight each other, so rook notes it in the menu with a link to the setting.
+
+## Layouts and rules
+
+A **layout** is a named arrangement of apps, like "coding" = editor on the left two-thirds and terminal on the right third. To make one, arrange your windows and choose **Layouts ▸ Save Current Layout…**. That writes `~/.config/rook/layouts/<name>.toml`, which you can edit. You can also define layouts in `config.toml`:
+
+```toml
+[keys]
+"ctrl+alt+1" = "layout:coding"
+
+[[layouts.coding]]
+app = "com.microsoft.VSCode"        # bundle id
+rect = "left-two-thirds"            # placement action or { x, y, w, h } fractions
+display = "main"                    # "main" | "secondary" | 1,2,3 (left→right) | display name
+
+[[layouts.coding]]
+app = "com.mitchellh.ghostty"
+rect = "right-third"
+```
+
+Applying a layout opens any missing apps in the background, waits for their windows, places them, and brings the first app to the front. Displays fall back to the main one, so a two-monitor layout still works on the laptop alone. Snapped windows are saved by action name, so they pick up gap changes later. `title = "…"` picks a specific window when an app has several.
+
+A **rule** places an app's new windows as they open. Windows that already exist are left alone:
+
+```toml
+[[rules]]
+app = "com.apple.Terminal"
+rect = "right-half"
+```
+
+Things macOS gets in the way of, which rook reports in the menu after applying a layout:
+
+- Accessibility only lists windows on the current Space, so windows on another desktop are skipped.
+- A window sent to a display that's showing a native-fullscreen app lands on that display's desktop, hidden behind the fullscreen app.
+
+## Scripting
+
+`rook://` URLs run commands from a terminal, Raycast, Shortcuts, etc. (`-g` keeps focus where it is):
+
+```sh
+open -g rook://layout/coding          # apply a layout
+open -g rook://snap/left-half         # snap the focused window
+open -g rook://save-layout/coding     # save current windows (won't overwrite an existing file)
+open -g rook://reload                 # reload the config
+```
+
+To see what rook is doing: `log stream --predicate 'subsystem == "dev.maskedsyntax.rook"'`.
 
 ## Default shortcuts
 
@@ -70,10 +118,10 @@ These match Rectangle's defaults (`⌃⌥` = ctrl+alt):
 ```
 Sources/
   RookCore/   pure logic: geometry, snap math, window memory, shortcut parsing (unit-tested)
-  RookAX/     Accessibility wrappers (AXWindow) and display enumeration
+  RookAX/     Accessibility wrappers (AXWindow, WindowObserver) and display enumeration
   RookInput/  global hotkeys (Carbon)
   RookUI/     menu bar item, permission onboarding
-  Rook/       app entry, WindowController (single dispatch point for all actions)
+  Rook/       app entry, WindowController (single dispatch point), DragController, LayoutRunner
 ```
 
 Internally rook works in AX coordinates (top-left origin of the primary display). AppKit rects are converted once, in `Coordinates.flip`.

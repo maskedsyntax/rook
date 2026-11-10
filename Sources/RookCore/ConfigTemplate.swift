@@ -17,16 +17,19 @@ extension Config {
     resize_step = 40
 
     [drag]
+    # Mouse features. Both are off by default; with both off rook never
+    # watches the mouse at all.
+    #
     # Drag a window to a screen edge to snap it: left/right edge = half,
     # corners = quarter, top edge = maximize. A preview shows where it'll land.
-    enabled = true
+    enabled = false
     # Bottom edge: "thirds" (left/center/right by cursor position), "half", or "none".
     bottom_edge = "thirds"
     # Dragging a snapped window away restores the size it had before snapping.
     restore_size = true
     # Hold these and drag anywhere inside a window to move it; right-drag to
-    # resize from the nearest corner. "none" to disable.
-    modifier = "ctrl+cmd"
+    # resize from the nearest corner. e.g. "ctrl+cmd", or "none" to disable.
+    modifier = "none"
 
     # Shortcuts. This table replaces the built-in defaults entirely:
     # delete a line to drop that shortcut, or set it to "none".
@@ -41,6 +44,7 @@ extension Config {
     #   top-left top-right bottom-left bottom-right
     #   maximize almost-maximize center larger smaller restore
     #   next-display previous-display reload-config
+    #   layout:<name>   (apply a saved layout, see the end of this file)
     #
     # Pressing left-half / right-half again cycles ½ → ⅔ → ⅓.
     [keys]
@@ -69,6 +73,31 @@ extension Config {
 
     "ctrl+alt+cmd+right" = "next-display"
     "ctrl+alt+cmd+left" = "previous-display"
+    # "ctrl+alt+1" = "layout:coding"
+
+    # Layouts: named arrangements of apps you apply with a shortcut or from the
+    # menu (Layouts ▸). Easiest: arrange your windows, then Layouts ▸ Save
+    # Current Layout…, which writes ~/.config/rook/layouts/<name>.toml.
+    # Or define them here, one [[layouts.<name>]] block per window:
+    #
+    # [[layouts.coding]]
+    # app = "com.microsoft.VSCode"     # bundle id: osascript -e 'id of app "Visual Studio Code"'
+    # rect = "left-two-thirds"         # any placement action, or { x = 0, y = 0, w = 0.6, h = 1 }
+    # display = "main"                 # "main", "secondary", 1/2/3 (left to right), or a display name
+    #
+    # [[layouts.coding]]
+    # app = "com.mitchellh.ghostty"
+    # rect = "right-third"
+    # launch = true                    # open the app if it isn't running (default)
+    #
+    # A title picks one of an app's windows: title = "Inbox"
+
+    # Rules: place new windows of an app automatically when they open.
+    #
+    # [[rules]]
+    # app = "com.apple.Terminal"
+    # rect = "right-half"
+    # display = "secondary"            # optional; default is wherever the window opened
 
     """#
 }

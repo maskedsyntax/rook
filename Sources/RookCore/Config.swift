@@ -5,11 +5,16 @@ import TOMLKit
 /// Something a shortcut can trigger.
 public enum Command: Equatable, Hashable, Sendable, CustomStringConvertible {
     case snap(SnapAction)
+    case layout(String)
     case reloadConfig
 
     public init?(name: String) {
         if name == "reload-config" {
             self = .reloadConfig
+        } else if name.hasPrefix("layout:") {
+            let layout = String(name.dropFirst("layout:".count)).trimmingCharacters(in: .whitespaces)
+            guard !layout.isEmpty else { return nil }
+            self = .layout(layout)
         } else if let action = SnapAction(rawValue: name) {
             self = .snap(action)
         } else {
@@ -20,6 +25,7 @@ public enum Command: Equatable, Hashable, Sendable, CustomStringConvertible {
     public var description: String {
         switch self {
         case .snap(let a): return a.rawValue
+        case .layout(let name): return "layout:\(name)"
         case .reloadConfig: return "reload-config"
         }
     }
@@ -44,6 +50,13 @@ public struct Config: Equatable, Sendable {
     public var resizeStep: CGFloat
     public var bindings: [Binding]
     public var drag: DragConfig = DragConfig()
+    /// From config.toml first, then saved layout files (config wins on a name clash).
+    public var layouts: [Layout] = []
+    public var rules: [Rule] = []
+
+    public func layout(named name: String) -> Layout? {
+        layouts.first { $0.name == name }
+    }
 
     public static let `default`: Config = {
         let bindings = DefaultBindings.all.map { shortcut, action in
@@ -59,14 +72,15 @@ public struct Config: Equatable, Sendable {
 }
 
 public struct DragConfig: Equatable, Sendable {
-    /// Drag a window to a screen edge or corner to snap it.
-    public var enabled: Bool = true
+    /// Drag a window to a screen edge or corner to snap it. Off by default:
+    /// rook only watches the mouse when you opt in.
+    public var enabled: Bool = false
     public var bottomEdge: BottomEdge = .thirds
     /// Dragging a snapped window away gives it back its pre-snap size.
     public var restoreSizeOnUnsnap: Bool = true
     /// Hold these and drag anywhere in a window to move it (right-drag to
-    /// resize). nil disables modifier-drag.
-    public var modifier: KeyCombo.Modifiers? = [.control, .command]
+    /// resize). nil (the default) disables modifier-drag.
+    public var modifier: KeyCombo.Modifiers? = nil
 
     public init() {}
 
@@ -77,27 +91,45 @@ public struct DragConfig: Equatable, Sendable {
 public struct ConfigError: Error, Equatable, CustomStringConvertible {
     public let message: String
     public let line: Int?
+    /// Set for problems in a saved layout file rather than config.toml.
+    public let file: String?
 
-    public init(_ message: String, line: Int? = nil) {
+    public init(_ message: String, line: Int? = nil, file: String? = nil) {
         self.message = message
         self.line = line
+        self.file = file
     }
 
     public var description: String {
-        line.map { "line \($0): \(message)" } ?? message
+        let location = [file, line.map { "line \($0)" }].compactMap { $0 }.joined(separator: " ")
+        return location.isEmpty ? message : "\(location): \(message)"
+    }
+}
+
+/// A saved layout file (`layouts/<name>.toml`) handed to the parser.
+public struct LayoutFile: Sendable {
+    public let name: String
+    public let path: String
+    public let source: String
+
+    public init(name: String, path: String, source: String) {
+        self.name = name
+        self.path = path
+        self.source = source
     }
 }
 
 extension Config {
-    /// Top-level keys handled by later phases. Accepted silently so a config
-    /// written ahead of time doesn't error.
-    static let reservedKeys: Set<String> = ["layouts", "rules"]
-    static let knownKeys: Set<String> = ["gaps", "almost_maximize", "resize_step", "keys", "drag"]
+    static let reservedKeys: Set<String> = []
+    static let knownKeys: Set<String> = ["gaps", "almost_maximize", "resize_step", "keys", "drag", "layouts", "rules"]
 
     /// Parses a config file. Any error rejects the whole file so a half-valid
     /// config never replaces a working one. Warnings are for things that are
     /// safe to ignore (unknown keys, probably typos).
-    public static func parse(_ source: String) -> Result<(config: Config, warnings: [ConfigError]), ConfigError> {
+    ///
+    /// Saved layout files are more forgiving: a broken one is skipped with a
+    /// warning, because it shouldn't cost you your shortcuts.
+    public static func parse(_ source: String, layoutFiles: [LayoutFile] = []) -> Result<(config: Config, warnings: [ConfigError]), ConfigError> {
         let root: TOMLTable
         do {
             root = try TOMLTable(string: source)
@@ -108,20 +140,64 @@ extension Config {
         }
 
         var parser = Parser(source: source)
-        let config = parser.parse(root)
+        var config = parser.parse(root)
         if let first = parser.errors.first {
             return .failure(first)
         }
-        return .success((config, parser.warnings))
+        var warnings = parser.warnings
+
+        for file in layoutFiles.sorted(by: { $0.name < $1.name }) {
+            if config.layout(named: file.name) != nil {
+                warnings.append(ConfigError("layout '\(file.name)' is also defined in config.toml; using that one", file: file.path))
+                continue
+            }
+            switch parseLayoutFile(file) {
+            case .success(let layout): config.layouts.append(layout)
+            case .failure(let error): warnings.append(error)
+            }
+        }
+
+        // Shortcuts may name layouts from either place, so check them last.
+        for binding in config.bindings {
+            if case .layout(let name) = binding.command, config.layout(named: name) == nil {
+                let known = config.layouts.map(\.name).joined(separator: ", ")
+                return .failure(ConfigError(
+                    "'\(binding.shortcut)' uses unknown layout '\(name)'" + (known.isEmpty ? "" : " (layouts: \(known))"),
+                    line: parser.line(of: binding.shortcut)
+                ))
+            }
+        }
+        return .success((config, warnings))
+    }
+
+    /// A file holding `[[windows]]` entries.
+    public static func parseLayoutFile(_ file: LayoutFile) -> Result<Layout, ConfigError> {
+        let root: TOMLTable
+        do {
+            root = try TOMLTable(string: file.source)
+        } catch let error as TOMLParseError {
+            return .failure(ConfigError(error.description, line: error.source.begin.line, file: file.path))
+        } catch {
+            return .failure(ConfigError("\(error)", file: file.path))
+        }
+        var parser = Parser(source: file.source, file: file.path)
+        guard let array = root["windows"]?.array else {
+            return .failure(ConfigError("expected [[windows]] entries", file: file.path))
+        }
+        let entries = parser.parseEntries(array, context: "windows")
+        if let first = parser.errors.first { return .failure(first) }
+        return .success(Layout(name: file.name, entries: entries, file: file.path))
     }
 
     private struct Parser {
         let lines: [Substring]
+        let file: String?
         var errors: [ConfigError] = []
         var warnings: [ConfigError] = []
 
-        init(source: String) {
+        init(source: String, file: String? = nil) {
             lines = source.split(separator: "\n", omittingEmptySubsequences: false)
+            self.file = file
         }
 
         /// TOMLKit doesn't expose node positions, so locate a key textually.
@@ -139,7 +215,7 @@ extension Config {
         }
 
         mutating func error(_ message: String, key: String) {
-            errors.append(ConfigError(message, line: line(of: key)))
+            errors.append(ConfigError(message, line: line(of: key), file: file))
         }
 
         func number(_ value: TOMLValueConvertible?) -> Double? {
@@ -199,6 +275,32 @@ extension Config {
                 }
             }
 
+            if let value = root["layouts"] {
+                if let table = value.table {
+                    for name in table.keys.sorted(by: { (line(of: $0) ?? 0) < (line(of: $1) ?? 0) }) {
+                        guard LayoutCapture.sanitizedName(name) == name.lowercased() else {
+                            error("layout name '\(name)' may only use letters, digits, - and _", key: name)
+                            continue
+                        }
+                        guard let array = table[name]?.array else {
+                            error("layout '\(name)' must be a list: use [[layouts.\(name)]] for each window", key: name)
+                            continue
+                        }
+                        config.layouts.append(Layout(name: name, entries: parseEntries(array, context: "layouts.\(name)")))
+                    }
+                } else {
+                    error("layouts must be written as [[layouts.<name>]] sections", key: "layouts")
+                }
+            }
+
+            if let value = root["rules"] {
+                if let array = value.array {
+                    config.rules = parseRules(array)
+                } else {
+                    error("rules must be written as [[rules]] sections", key: "rules")
+                }
+            }
+
             if let value = root["keys"] {
                 guard let table = value.table else {
                     error("[keys] must be a table of \"shortcut\" = \"action\"", key: "keys")
@@ -208,6 +310,109 @@ extension Config {
             }
 
             return config
+        }
+
+        // MARK: Layouts and rules
+
+        mutating func parseEntries(_ array: TOMLArray, context: String) -> [LayoutEntry] {
+            var entries: [LayoutEntry] = []
+            for value in array {
+                guard let table = value.table else {
+                    error("each [[\(context)]] entry must be a table", key: context)
+                    continue
+                }
+                let known: Set<String> = ["app", "title", "display", "rect", "launch"]
+                warnUnknown(table, known: known, context: context)
+
+                guard let app = table["app"]?.string, !app.isEmpty else {
+                    error("[[\(context)]] entry needs app = \"<bundle id>\" (e.g. \"com.apple.Safari\")", key: context)
+                    continue
+                }
+                guard let rect = parseRect(table["rect"], context: context, app: app) else { continue }
+                var entry = LayoutEntry(app: app, rect: rect)
+                entry.title = table["title"]?.string
+                if let display = parseDisplay(table["display"], context: context, app: app) { entry.display = display }
+                if let launch = table["launch"] {
+                    if let b = launch.bool { entry.launch = b } else { error("launch must be true or false", key: app) }
+                }
+                entries.append(entry)
+            }
+            return entries
+        }
+
+        mutating func parseRules(_ array: TOMLArray) -> [Rule] {
+            var rules: [Rule] = []
+            for value in array {
+                guard let table = value.table else {
+                    error("each [[rules]] entry must be a table", key: "rules")
+                    continue
+                }
+                warnUnknown(table, known: ["app", "title", "display", "rect"], context: "rules")
+                guard let app = table["app"]?.string, !app.isEmpty else {
+                    error("[[rules]] entry needs app = \"<bundle id>\"", key: "rules")
+                    continue
+                }
+                guard let rect = parseRect(table["rect"], context: "rules", app: app) else { continue }
+                var rule = Rule(app: app, rect: rect)
+                rule.title = table["title"]?.string
+                rule.display = parseDisplay(table["display"], context: "rules", app: app)
+                rules.append(rule)
+            }
+            return rules
+        }
+
+        mutating func warnUnknown(_ table: TOMLTable, known: Set<String>, context: String) {
+            for key in table.keys where !known.contains(key) {
+                warnings.append(ConfigError("unknown setting '\(key)' in [[\(context)]] (ignored)", line: line(of: key), file: file))
+            }
+        }
+
+        mutating func parseRect(_ value: TOMLValueConvertible?, context: String, app: String) -> LayoutRect? {
+            guard let value else {
+                error("[[\(context)]] entry for \(app) needs rect = \"<action>\" or { x, y, w, h }", key: app)
+                return nil
+            }
+            if let name = value.string {
+                guard let action = SnapAction(rawValue: name), LayoutRect.isPlacement(action) else {
+                    let suggestion = Self.closestAction(to: name).map { " (did you mean '\($0)'?)" } ?? ""
+                    error("rect '\(name)' isn't a placement\(suggestion)", key: name)
+                    return nil
+                }
+                return .action(action)
+            }
+            if let t = value.table {
+                var v: [String: CGFloat] = [:]
+                for k in ["x", "y", "w", "h"] {
+                    guard let n = number(t[k]) else {
+                        error("rect for \(app) needs numbers x, y, w, h (fractions of the screen)", key: app)
+                        return nil
+                    }
+                    v[k] = n
+                }
+                let u = UnitRect(x: v["x"]!, y: v["y"]!, w: v["w"]!, h: v["h"]!)
+                let eps: CGFloat = 0.0005
+                guard u.x >= 0, u.y >= 0, u.w > 0, u.h > 0, u.x + u.w <= 1 + eps, u.y + u.h <= 1 + eps else {
+                    error("rect for \(app) must stay within 0…1 (x + w ≤ 1, y + h ≤ 1)", key: app)
+                    return nil
+                }
+                return .unit(u)
+            }
+            error("rect for \(app) must be an action name or { x, y, w, h }", key: app)
+            return nil
+        }
+
+        mutating func parseDisplay(_ value: TOMLValueConvertible?, context: String, app: String) -> DisplaySelector? {
+            guard let value else { return nil }
+            if let s = value.string { return DisplaySelector(string: s) }
+            if let i = value.int {
+                guard i >= 1 else {
+                    error("display numbers start at 1 (left to right)", key: app)
+                    return nil
+                }
+                return .index(i)
+            }
+            error("display must be \"main\", \"secondary\", a number, or a display name", key: app)
+            return nil
         }
 
         mutating func parseDrag(_ table: TOMLTable) -> DragConfig {
