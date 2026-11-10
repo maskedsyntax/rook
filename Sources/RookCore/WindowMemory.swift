@@ -60,4 +60,11 @@ public struct WindowMemory: Sendable {
     }
 
     public func hasEntry(window: UInt32) -> Bool { entries[window] != nil }
+
+    /// The pre-snap frame if the window is still exactly where rook put it
+    /// (i.e. it's "snapped"), else nil.
+    public func snappedOriginal(window: UInt32, current: CGRect) -> CGRect? {
+        guard let entry = entries[window], untouched(entry, current: current) else { return nil }
+        return entry.original
+    }
 }

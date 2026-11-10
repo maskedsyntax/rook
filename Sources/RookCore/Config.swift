@@ -43,6 +43,7 @@ public struct Config: Equatable, Sendable {
     public var almostMaximize: CGFloat
     public var resizeStep: CGFloat
     public var bindings: [Binding]
+    public var drag: DragConfig = DragConfig()
 
     public static let `default`: Config = {
         let bindings = DefaultBindings.all.map { shortcut, action in
@@ -55,6 +56,21 @@ public struct Config: Equatable, Sendable {
     public var engine: SnapEngine {
         SnapEngine(gaps: gaps, almostMaximizeRatio: almostMaximize, resizeStep: resizeStep)
     }
+}
+
+public struct DragConfig: Equatable, Sendable {
+    /// Drag a window to a screen edge or corner to snap it.
+    public var enabled: Bool = true
+    public var bottomEdge: BottomEdge = .thirds
+    /// Dragging a snapped window away gives it back its pre-snap size.
+    public var restoreSizeOnUnsnap: Bool = true
+    /// Hold these and drag anywhere in a window to move it (right-drag to
+    /// resize). nil disables modifier-drag.
+    public var modifier: KeyCombo.Modifiers? = [.control, .command]
+
+    public init() {}
+
+    public var zones: DragZones { DragZones(bottom: bottomEdge) }
 }
 
 /// A config problem pinned to a line when we can find one.
@@ -75,8 +91,8 @@ public struct ConfigError: Error, Equatable, CustomStringConvertible {
 extension Config {
     /// Top-level keys handled by later phases. Accepted silently so a config
     /// written ahead of time doesn't error.
-    static let reservedKeys: Set<String> = ["drag", "layouts", "rules"]
-    static let knownKeys: Set<String> = ["gaps", "almost_maximize", "resize_step", "keys"]
+    static let reservedKeys: Set<String> = ["layouts", "rules"]
+    static let knownKeys: Set<String> = ["gaps", "almost_maximize", "resize_step", "keys", "drag"]
 
     /// Parses a config file. Any error rejects the whole file so a half-valid
     /// config never replaces a working one. Warnings are for things that are
@@ -175,6 +191,14 @@ extension Config {
                 }
             }
 
+            if let value = root["drag"] {
+                if let table = value.table {
+                    config.drag = parseDrag(table)
+                } else {
+                    error("[drag] must be a table", key: "drag")
+                }
+            }
+
             if let value = root["keys"] {
                 guard let table = value.table else {
                     error("[keys] must be a table of \"shortcut\" = \"action\"", key: "keys")
@@ -184,6 +208,37 @@ extension Config {
             }
 
             return config
+        }
+
+        mutating func parseDrag(_ table: TOMLTable) -> DragConfig {
+            var drag = DragConfig()
+            let known: Set<String> = ["enabled", "bottom_edge", "restore_size", "modifier"]
+            for key in table.keys where !known.contains(key) {
+                warnings.append(ConfigError("unknown drag setting '\(key)' (ignored)", line: line(of: key)))
+            }
+            if let v = table["enabled"] {
+                if let b = v.bool { drag.enabled = b } else { error("drag.enabled must be true or false", key: "enabled") }
+            }
+            if let v = table["restore_size"] {
+                if let b = v.bool { drag.restoreSizeOnUnsnap = b } else { error("drag.restore_size must be true or false", key: "restore_size") }
+            }
+            if let v = table["bottom_edge"] {
+                if let s = v.string, let edge = BottomEdge(rawValue: s) {
+                    drag.bottomEdge = edge
+                } else {
+                    error("drag.bottom_edge must be \"thirds\", \"half\" or \"none\"", key: "bottom_edge")
+                }
+            }
+            if let v = table["modifier"] {
+                if let s = v.string, s == "none" {
+                    drag.modifier = nil
+                } else if let s = v.string, let mods = KeyCombo.parseModifiers(s) {
+                    drag.modifier = mods
+                } else {
+                    error("drag.modifier must be modifiers like \"ctrl+cmd\", or \"none\"", key: "modifier")
+                }
+            }
+            return drag
         }
 
         /// `[keys]` replaces the defaults entirely, so the file is the whole truth.

@@ -58,6 +58,48 @@ public final class AXWindow {
         return nil
     }
 
+    /// The standard window under a screen point (AX coordinates), ignoring
+    /// rook's own windows, the desktop, and sheets/popovers' parents' chrome.
+    public static func at(_ point: CGPoint) -> AXWindow? {
+        var hit: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(point.x), Float(point.y), &hit) == .success,
+              let hit
+        else { return nil }
+
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(hit, &pid) == .success, pid != ProcessInfo.processInfo.processIdentifier else { return nil }
+
+        let window: AXUIElement
+        if (AX.copy(hit, kAXRoleAttribute) as? String) == kAXWindowRole {
+            window = hit
+        } else if let value = AX.copy(hit, kAXWindowAttribute), CFGetTypeID(value) == AXUIElementGetTypeID() {
+            window = value as! AXUIElement
+        } else {
+            return nil
+        }
+        let result = AXWindow(element: window, app: AXUIElementCreateApplication(pid), pid: pid)
+        guard result.subrole == kAXStandardWindowSubrole else { return nil }
+        return result
+    }
+
+    /// Brings the window to the front and activates its app.
+    public func raise() {
+        AXUIElementPerformAction(element, kAXRaiseAction as CFString)
+        NSRunningApplication(processIdentifier: pid)?.activate()
+    }
+
+    /// For continuous updates (modifier-drag), toggle enhanced UI once around
+    /// the whole gesture instead of per frame. Returns whether it was on.
+    public func suspendEnhancedUI() -> Bool {
+        let enhanced = (AX.copy(app, "AXEnhancedUserInterface") as? Bool) ?? false
+        if enhanced { AX.set(app, "AXEnhancedUserInterface", kCFBooleanFalse) }
+        return enhanced
+    }
+
+    public func resumeEnhancedUI(_ wasOn: Bool) {
+        if wasOn { AX.set(app, "AXEnhancedUserInterface", kCFBooleanTrue) }
+    }
+
     public var windowID: CGWindowID? {
         var id: CGWindowID = 0
         guard _AXUIElementGetWindow(element, &id) == .success, id != 0 else { return nil }

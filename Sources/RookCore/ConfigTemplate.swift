@@ -16,6 +16,18 @@ extension Config {
     # Points added/removed on each side by "larger" / "smaller".
     resize_step = 40
 
+    [drag]
+    # Drag a window to a screen edge to snap it: left/right edge = half,
+    # corners = quarter, top edge = maximize. A preview shows where it'll land.
+    enabled = true
+    # Bottom edge: "thirds" (left/center/right by cursor position), "half", or "none".
+    bottom_edge = "thirds"
+    # Dragging a snapped window away restores the size it had before snapping.
+    restore_size = true
+    # Hold these and drag anywhere inside a window to move it; right-drag to
+    # resize from the nearest corner. "none" to disable.
+    modifier = "ctrl+cmd"
+
     # Shortcuts. This table replaces the built-in defaults entirely:
     # delete a line to drop that shortcut, or set it to "none".
     #

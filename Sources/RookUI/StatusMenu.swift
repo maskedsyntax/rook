@@ -3,21 +3,34 @@ import AppKit
 /// The menu bar item. Kept dumb: it renders state and forwards clicks.
 @MainActor
 public final class StatusMenu: NSObject, NSMenuDelegate {
+    /// A line in the menu describing a problem. Clicking it opens `url`, or
+    /// the config file when `url` is nil.
+    public struct Notice {
+        public enum Kind { case error, info }
+        public var text: String
+        public var kind: Kind
+        public var url: URL?
+
+        public init(_ text: String, kind: Kind, url: URL? = nil) {
+            self.text = text
+            self.kind = kind
+            self.url = url
+        }
+    }
+
     public struct State {
         public var enabled: Bool
         public var trusted: Bool
-        /// Blocking problems (config errors, shortcuts that couldn't register).
-        /// Any of these turns the icon into a warning.
-        public var errors: [String]
-        /// Non-blocking notes (unknown config keys).
-        public var warnings: [String]
+        /// Errors (config not applied, shortcut taken) turn the icon into a warning.
+        public var notices: [Notice]
 
-        public init(enabled: Bool, trusted: Bool, errors: [String] = [], warnings: [String] = []) {
+        public init(enabled: Bool, trusted: Bool, notices: [Notice] = []) {
             self.enabled = enabled
             self.trusted = trusted
-            self.errors = errors
-            self.warnings = warnings
+            self.notices = notices
         }
+
+        var hasErrors: Bool { notices.contains { $0.kind == .error } }
     }
 
     public var state: () -> State = { State(enabled: true, trusted: false) }
@@ -42,7 +55,7 @@ public final class StatusMenu: NSObject, NSMenuDelegate {
         let s = state()
         let symbol: String
         let description: String
-        if !s.errors.isEmpty {
+        if s.hasErrors {
             symbol = "exclamationmark.triangle"
             description = "rook: problem"
         } else if !s.enabled || !s.trusted {
@@ -56,7 +69,7 @@ public final class StatusMenu: NSObject, NSMenuDelegate {
             ?? NSImage(systemSymbolName: "rectangle.split.2x1", accessibilityDescription: description)
         image?.isTemplate = true
         item.button?.image = image
-        item.button?.toolTip = s.errors.first.map { "rook: \($0)" } ?? description
+        item.button?.toolTip = s.notices.first { $0.kind == .error }.map { "rook: \($0.text)" } ?? description
     }
 
     /// Rebuilt on every open so it always reflects live state.
@@ -67,11 +80,14 @@ public final class StatusMenu: NSObject, NSMenuDelegate {
         let title = s.trusted ? (s.enabled ? "rook is running" : "rook is paused") : "rook: waiting for Accessibility access"
         menu.addItem(disabled(title))
 
-        if !s.errors.isEmpty || !s.warnings.isEmpty {
+        if !s.notices.isEmpty {
             menu.addItem(.separator())
-            // Clicking a problem opens the config, where it can be fixed.
-            for e in s.errors { menu.addItem(action("⚠︎ \(e)", #selector(openConfig))) }
-            for w in s.warnings { menu.addItem(action("ⓘ \(w)", #selector(openConfig))) }
+            for notice in s.notices.sorted(by: { $0.kind == .error && $1.kind != .error }) {
+                let prefix = notice.kind == .error ? "⚠︎" : "ⓘ"
+                let item = action("\(prefix) \(notice.text)", #selector(openNotice(_:)))
+                item.representedObject = notice.url
+                menu.addItem(item)
+            }
         }
 
         menu.addItem(.separator())
@@ -102,6 +118,9 @@ public final class StatusMenu: NSObject, NSMenuDelegate {
 
     @objc private func toggleEnabled() { onToggleEnabled() }
     @objc private func openConfig() { onOpenConfig() }
+    @objc private func openNotice(_ sender: NSMenuItem) {
+        if let url = sender.representedObject as? URL { NSWorkspace.shared.open(url) } else { onOpenConfig() }
+    }
     @objc private func revealConfig() { onRevealConfig() }
     @objc private func reloadConfig() { onReloadConfig() }
     @objc private func quit() { onQuit() }

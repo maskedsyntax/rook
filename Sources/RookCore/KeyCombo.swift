@@ -71,6 +71,22 @@ public struct KeyCombo: Hashable, Sendable, CustomStringConvertible {
         return KeyCombo(keyCode: key.code, modifiers: mods, keyName: key.name)
     }
 
+    /// Parses a modifiers-only string like `"ctrl+cmd"`. Returns nil if any
+    /// token isn't a modifier or the string is empty.
+    public static func parseModifiers(_ string: String) -> Modifiers? {
+        let tokens = string.lowercased()
+            .split(separator: "+", omittingEmptySubsequences: true)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard !tokens.isEmpty else { return nil }
+        var mods: Modifiers = []
+        for token in tokens {
+            guard let m = modifierNames[token] else { return nil }
+            mods.insert(m)
+        }
+        return mods
+    }
+
     static let modifierNames: [String: Modifiers] = [
         "ctrl": .control, "control": .control, "⌃": .control,
         "alt": .option, "opt": .option, "option": .option, "⌥": .option,

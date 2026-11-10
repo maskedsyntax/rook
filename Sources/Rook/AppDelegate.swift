@@ -7,6 +7,7 @@ import RookUI
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let windows = WindowController()
+    private lazy var drag = DragController(windows: windows)
     private let statusMenu = StatusMenu()
     private let configURL = ConfigLocation.url
     private lazy var watcher = ConfigWatcher(url: configURL)
@@ -24,19 +25,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AX.configureTimeout()
 
         statusMenu.state = { [unowned self] in
-            var errors: [String] = []
-            if let configError { errors.append("Config not applied: \(configError)") }
-            errors += hotkeyErrors
-            return .init(
-                enabled: enabled,
-                trusted: Accessibility.isTrusted,
-                errors: errors,
-                warnings: configWarnings.map(\.description)
-            )
+            var notices: [StatusMenu.Notice] = []
+            if let configError { notices.append(.init("Config not applied: \(configError)", kind: .error)) }
+            notices += hotkeyErrors.map { .init($0, kind: .error) }
+            if let tapError = drag.tapError { notices.append(.init(tapError, kind: .error)) }
+            notices += configWarnings.map { .init($0.description, kind: .info) }
+            notices += SystemConflicts.notices(dragEnabled: config.drag.enabled)
+            return .init(enabled: enabled, trusted: Accessibility.isTrusted, notices: notices)
         }
         statusMenu.onToggleEnabled = { [unowned self] in
             enabled.toggle()
             registerHotkeys()
+            drag.active = enabled && started
         }
         statusMenu.onOpenConfig = { [unowned self] in openConfig() }
         statusMenu.onRevealConfig = { [unowned self] in
@@ -60,6 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !started else { return }
         started = true
         registerHotkeys()
+        drag.active = enabled
     }
 
     // MARK: Config
@@ -86,6 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             configWarnings = result.warnings
             configError = nil
             windows.engine = config.engine
+            drag.config = config.drag
             if started { registerHotkeys() }
         case .failure(let error):
             configError = error

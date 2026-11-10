@@ -2,24 +2,38 @@ import AppKit
 import RookAX
 import RookCore
 
-/// Executes a `SnapAction` against the focused window. Every trigger (hotkey,
-/// drag, menu, later the CLI) funnels through `perform`.
+/// Executes a `SnapAction` against a window. Every trigger (hotkey, drag,
+/// menu, later the CLI) funnels through here, and it owns the per-window
+/// memory that makes restore, cycling and unsnap work across all of them.
 @MainActor
 final class WindowController {
     var engine = SnapEngine()
     private var memory = WindowMemory()
 
+    /// Keyboard entry point: acts on the focused window.
     func perform(_ action: SnapAction) {
-        guard let window = AXWindow.focused(),
-              !window.isFullscreen,
+        guard let window = AXWindow.focused() else {
+            NSSound.beep()
+            return
+        }
+        perform(action, on: window, cycle: true)
+    }
+
+    /// - Parameters:
+    ///   - display: target display; defaults to the one holding most of the window.
+    ///   - before: frame to remember as the restore point; defaults to the current frame.
+    ///   - cycle: whether repeated presses walk the action's size cycle.
+    func perform(_ action: SnapAction, on window: AXWindow, display: Display? = nil, before: CGRect? = nil, cycle: Bool = false) {
+        guard !window.isFullscreen,
               !window.isMinimized,
               let current = window.frame,
-              let display = DisplayManager.display(for: current)
+              let display = display ?? DisplayManager.display(for: current)
         else {
             NSSound.beep()
             return
         }
         let id = window.windowID
+        let before = before ?? current
 
         switch action {
         case .restore:
@@ -37,13 +51,26 @@ final class WindowController {
             let from = engine.usableArea(display.visibleFrame)
             let to = engine.usableArea(target.visibleFrame)
             let frame = SnapEngine.translate(current, from: from, to: to)
-            apply(frame, to: window, area: to, action: action, id: id, before: current)
+            apply(frame, to: window, area: to, action: action, id: id, before: before)
 
         default:
-            let resolved = id.map { memory.resolve(action, window: $0, current: current) } ?? action
+            let resolved = cycle ? id.map { memory.resolve(action, window: $0, current: current) } ?? action : action
             guard let frame = engine.frame(for: resolved, in: display.visibleFrame, current: current) else { return }
-            apply(frame, to: window, area: engine.usableArea(display.visibleFrame), action: resolved, id: id, before: current)
+            apply(frame, to: window, area: engine.usableArea(display.visibleFrame), action: resolved, id: id, before: before)
         }
+    }
+
+    /// Where `action` would put a window on `display`, for the drag preview.
+    func preview(_ action: SnapAction, display: Display, current: CGRect) -> CGRect? {
+        engine.frame(for: action, in: display.visibleFrame, current: current)
+    }
+
+    /// If the window is still where rook snapped it, returns its pre-snap size
+    /// and forgets the snap (dragging it away "unsnaps" it).
+    func takeUnsnapSize(window: AXWindow, current: CGRect) -> CGSize? {
+        guard let id = window.windowID, let original = memory.snappedOriginal(window: id, current: current) else { return nil }
+        memory.forget(window: id)
+        return original.size
     }
 
     private func apply(_ target: CGRect, to window: AXWindow, area: CGRect, action: SnapAction, id: CGWindowID?, before: CGRect) {

@@ -7,7 +7,7 @@ A fast, native window manager for macOS that sits between Rectangle and a tiling
 - [x] Phase 0: app scaffold, menu bar item, Accessibility onboarding, stable signing
 - [x] Phase 1: keyboard snapping (halves, thirds, quarters, maximize, center, grow/shrink), size cycling, restore, move between displays
 - [x] Phase 2: `~/.config/rook/config.toml` with live reload
-- [ ] Phase 3: drag-to-snap overlay, modifier-drag move/resize
+- [x] Phase 3: drag-to-snap overlay, modifier-drag move/resize
 - [ ] Phase 4: named layouts and auto-placement rules
 - [ ] Phase 5: launch at login, app-compat pass, Homebrew cask
 
@@ -34,7 +34,20 @@ resize_step = 40
 "ctrl+alt+left"  = "left-half"
 "ctrl+alt+r"     = "reload-config"
 "ctrl+alt+up"    = "none"          # disable
+
+[drag]
+enabled = true                     # snap by dragging to screen edges
+bottom_edge = "thirds"             # "thirds" | "half" | "none"
+restore_size = true                # dragging a snapped window away restores its size
+modifier = "ctrl+cmd"              # hold + drag to move, + right-drag to resize; "none" to disable
 ```
+
+## Mouse
+
+- **Drag to snap:** drag a window by its title bar to a screen edge. Left/right = half, corners = quarter, top = maximize, bottom = thirds by cursor position. A preview shows where it will land; let go to snap it. Edges shared with another monitor are ignored, so moving a window between monitors doesn't trigger a snap.
+- **Unsnap:** dragging a snapped window away gives it back its earlier size, still under the cursor.
+- **Modifier-drag:** hold `ctrl+cmd` and drag anywhere in a window to move it, or right-drag to resize from the nearest corner. Screen edges snap here too.
+- macOS 15+ has its own edge tiling. The two fight each other, so rook notes it in the menu with a link to the setting.
 
 ## Default shortcuts
 
