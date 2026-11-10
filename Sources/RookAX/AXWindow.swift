@@ -108,8 +108,17 @@ public final class AXWindow {
 
     /// Standard windows of an app, front to back. Includes minimized ones.
     public static func windows(of pid: pid_t) -> [AXWindow] {
+        windowsIfResponding(of: pid) ?? []
+    }
+
+    /// Like `windows(of:)`, but nil when the app didn't answer within the AX
+    /// timeout (hung, or stopped), so callers can tell that from "no windows".
+    public static func windowsIfResponding(of pid: pid_t) -> [AXWindow]? {
         let app = AXUIElementCreateApplication(pid)
-        guard let list = AX.copy(app, kAXWindowsAttribute) as? [AXUIElement] else { return [] }
+        var value: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value)
+        if result == .cannotComplete { return nil }
+        guard result == .success, let list = value as? [AXUIElement] else { return [] }
         return list
             .map { AXWindow(element: $0, app: app, pid: pid) }
             .filter { $0.subrole == kAXStandardWindowSubrole }

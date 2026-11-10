@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 import RookAX
 import RookCore
 import RookInput
@@ -36,6 +37,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             notices += configWarnings.map { .init($0.description, kind: .info) }
             notices += layoutProblems.map { .init($0, kind: .info) }
             notices += SystemConflicts.notices(dragEnabled: config.drag.enabled)
+            if LoginItem.needsApproval {
+                notices.append(.init("Launch at Login needs approval in Login Items settings", kind: .info,
+                                     url: URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")))
+            } else if LoginItem.isEnabled, !LoginItem.isInApplications {
+                notices.append(.init("Launch at Login starts \(Bundle.main.bundleURL.path); run `make install` to use /Applications", kind: .info))
+            }
             let shortcuts = Dictionary(
                 config.bindings.compactMap { b -> (String, String)? in
                     if case .layout(let name) = b.command { return (name, b.shortcut) }
@@ -47,7 +54,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 enabled: enabled,
                 trusted: Accessibility.isTrusted,
                 notices: notices,
-                layouts: config.layouts.map { ($0.name, shortcuts[$0.name]) }
+                layouts: config.layouts.map { ($0.name, shortcuts[$0.name]) },
+                launchAtLogin: LoginItem.isEnabled || LoginItem.needsApproval
             )
         }
         statusMenu.onToggleEnabled = { [unowned self] in
@@ -63,6 +71,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusMenu.onApplyLayout = { [unowned self] name in run(.layout(name)) }
         statusMenu.onSaveLayout = { [unowned self] in saveCurrentLayout() }
         statusMenu.onOpenLayoutsFolder = { NSWorkspace.shared.open(ConfigLocation.layoutsDirectory) }
+        statusMenu.onToggleLaunchAtLogin = { [unowned self] in
+            if let problem = LoginItem.toggle() { showError(problem) }
+            Log.app.notice("launch at login: \(String(describing: SMAppService.mainApp.status.rawValue))")
+            statusMenu.refreshIcon()
+        }
 
         layouts.onFinish = { [unowned self] name, problems in
             layoutProblems = problems.map { "layout '\(name)': \($0)" }
@@ -207,7 +220,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let displays = DisplayManager.displays
         let display = rule.display?.select(from: displays) ?? DisplayManager.display(for: frame)
         guard let display else { return }
-        windows.place(rule.rect, on: window, display: display)
+        windows.place(rule.rect, on: window, display: display, verify: true)
         Log.layout.notice("rule \(bundleID, privacy: .public) → \(String(describing: rule.rect), privacy: .public) on \(display.name, privacy: .public): \(String(describing: window.frame), privacy: .public)")
     }
 

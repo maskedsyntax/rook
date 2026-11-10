@@ -9,6 +9,7 @@ import RookCore
 final class WindowController {
     var engine = SnapEngine()
     private var memory = WindowMemory()
+    private var placementRevisions: [CGWindowID: UUID] = [:]
 
     /// Keyboard entry point: acts on the focused window.
     func perform(_ action: SnapAction) {
@@ -33,6 +34,7 @@ final class WindowController {
             return
         }
         let id = window.windowID
+        if let id { placementRevisions[id] = UUID() }
         let before = before ?? current
 
         switch action {
@@ -61,13 +63,32 @@ final class WindowController {
     }
 
     /// Places a window for a layout or rule.
-    func place(_ rect: LayoutRect, on window: AXWindow, display: Display) {
+    ///
+    /// - Parameter verify: check again shortly after and re-place once if the
+    ///   window moved itself. New windows do this: opening animations (Finder)
+    ///   and restored positions can land after our placement.
+    func place(_ rect: LayoutRect, on window: AXWindow, display: Display, verify: Bool = false) {
+        defer {
+            if verify, let id = window.windowID,
+               let revision = placementRevisions[id], let placed = window.frame {
+                DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(500)) { [weak self] in
+                    MainActor.assumeIsolated {
+                        // A newer snap or layout takes precedence over this retry.
+                        guard let self, self.placementRevisions[id] == revision else { return }
+                        guard let now = window.frame, !now.isApproximately(placed, tolerance: 2) else { return }
+                        Log.layout.notice("  window moved itself to \(String(describing: now), privacy: .public); placing again")
+                        self.place(rect, on: window, display: display)
+                    }
+                }
+            }
+        }
         window.unminimize()
         switch rect {
         case .action(let action):
             perform(action, on: window, display: display)
         case .unit(let unit):
             guard !window.isFullscreen, let current = window.frame else { return }
+            if let id = window.windowID { placementRevisions[id] = UUID() }
             let frame = engine.frame(forRaw: unit, in: display.visibleFrame)
             apply(frame, to: window, area: engine.usableArea(display.visibleFrame), action: nil, id: window.windowID, before: current)
         }
@@ -81,6 +102,7 @@ final class WindowController {
     /// If the window is still where rook snapped it, returns its pre-snap size
     /// and forgets the snap (dragging it away "unsnaps" it).
     func takeUnsnapSize(window: AXWindow, current: CGRect) -> CGSize? {
+        if let id = window.windowID { placementRevisions[id] = UUID() }
         guard let id = window.windowID, let original = memory.snappedOriginal(window: id, current: current) else { return nil }
         memory.forget(window: id)
         return original.size
@@ -95,9 +117,11 @@ final class WindowController {
         // from another display and ended up short, try once more shortly after.
         if retry, final.width < target.width - 1 || final.height < target.height - 1,
            let start, DisplayManager.display(for: start)?.id != DisplayManager.display(for: target)?.id {
+            let revision = id.flatMap { placementRevisions[$0] }
             DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(150)) { [weak self] in
                 MainActor.assumeIsolated {
-                    self?.apply(target, to: window, area: area, action: action, id: id, before: before, retry: false)
+                    guard let self, let id, self.placementRevisions[id] == revision else { return }
+                    self.apply(target, to: window, area: area, action: action, id: id, before: before, retry: false)
                 }
             }
         }

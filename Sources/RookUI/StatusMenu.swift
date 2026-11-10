@@ -25,12 +25,14 @@ public final class StatusMenu: NSObject, NSMenuDelegate {
         public var notices: [Notice]
         /// Layout names, with the shortcut that applies each, if any.
         public var layouts: [(name: String, shortcut: String?)]
+        public var launchAtLogin: Bool
 
-        public init(enabled: Bool, trusted: Bool, notices: [Notice] = [], layouts: [(name: String, shortcut: String?)] = []) {
+        public init(enabled: Bool, trusted: Bool, notices: [Notice] = [], layouts: [(name: String, shortcut: String?)] = [], launchAtLogin: Bool = false) {
             self.enabled = enabled
             self.trusted = trusted
             self.notices = notices
             self.layouts = layouts
+            self.launchAtLogin = launchAtLogin
         }
 
         var hasErrors: Bool { notices.contains { $0.kind == .error } }
@@ -44,6 +46,7 @@ public final class StatusMenu: NSObject, NSMenuDelegate {
     public var onApplyLayout: (String) -> Void = { _ in }
     public var onSaveLayout: () -> Void = {}
     public var onOpenLayoutsFolder: () -> Void = {}
+    public var onToggleLaunchAtLogin: () -> Void = {}
     public var onQuit: () -> Void = { NSApp.terminate(nil) }
 
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -125,6 +128,9 @@ public final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(action("Reload Config", #selector(reloadConfig), key: "r"))
 
         menu.addItem(.separator())
+        let login = action("Launch at Login", #selector(toggleLaunchAtLogin))
+        login.state = s.launchAtLogin ? .on : .off
+        menu.addItem(login)
         menu.addItem(action("Quit rook", #selector(quit), key: "q"))
     }
 
@@ -153,4 +159,5 @@ public final class StatusMenu: NSObject, NSMenuDelegate {
     }
     @objc private func saveLayout() { onSaveLayout() }
     @objc private func openLayoutsFolder() { onOpenLayoutsFolder() }
+    @objc private func toggleLaunchAtLogin() { onToggleLaunchAtLogin() }
 }

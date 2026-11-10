@@ -66,13 +66,29 @@ final class LayoutRunner {
 
         let deadline = Date().addingTimeInterval(Self.launchTimeout)
         var firstSeen: [String: Date] = [:]
+        var backoff: [String: Date] = [:]
+        var unanswered: [String: Int] = [:]
         var frontApp: pid_t?
 
         while !pending.isEmpty, !Task.isCancelled {
             for app in pending {
                 guard let running = Self.running(app) else { continue }
+                if let until = backoff[app], Date() < until { continue }
                 // Fullscreen windows can't be placed; don't let one use up an entry.
-                let found = AXWindow.windows(of: running.processIdentifier).filter { !$0.isFullscreen }
+                guard let all = AXWindow.windowsIfResponding(of: running.processIdentifier) else {
+                    // Hung apps cost one AX timeout per call; don't keep polling them.
+                    // Busy (opening a window, starting up) looks the same as hung for a
+                    // moment, so give it a few tries before giving up on it.
+                    unanswered[app, default: 0] += 1
+                    if !launched.contains(app), unanswered[app]! >= 3 {
+                        problems.append("\(Self.displayName(app)) isn't responding")
+                        pending.removeAll { $0 == app }
+                    } else {
+                        backoff[app] = Date().addingTimeInterval(launched.contains(app) ? 1 : 0.4)
+                    }
+                    continue
+                }
+                let found = all.filter { !$0.isFullscreen }
                 if found.isEmpty {
                     if !launched.contains(app) {
                         // Accessibility only lists windows on the current Space.
@@ -100,7 +116,7 @@ final class LayoutRunner {
                     if covered.contains(display.id) {
                         problems.append("\(Self.displayName(app)) went to \(display.name), which is showing a fullscreen app: it's on that display's desktop, behind it")
                     }
-                    windows.place(entry.rect, on: found[windowIndex], display: display)
+                    windows.place(entry.rect, on: found[windowIndex], display: display, verify: true)
                     Log.layout.notice("  \(app, privacy: .public) → \(String(describing: entry.rect), privacy: .public) on \(display.name, privacy: .public): \(String(describing: found[windowIndex].frame), privacy: .public)")
                 }
                 if app == apps.first { frontApp = running.processIdentifier }

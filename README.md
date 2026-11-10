@@ -9,7 +9,7 @@ A fast, native window manager for macOS that sits between Rectangle and a tiling
 - [x] Phase 2: `~/.config/rook/config.toml` with live reload
 - [x] Phase 3: drag-to-snap overlay, modifier-drag move/resize
 - [x] Phase 4: named layouts and auto-placement rules
-- [ ] Phase 5: launch at login, app-compat pass, Homebrew cask
+- [ ] Phase 5: launch at login and compatibility fixes implemented; signed universal packaging verified; login UI verification, notarization and Homebrew publication pending
 
 ## Build and run
 
@@ -20,6 +20,8 @@ make install  # copy to /Applications
 ```
 
 On first launch rook asks for Accessibility access and starts working as soon as you turn it on. The Makefile signs with your first "Apple Development" identity so the grant survives rebuilds. Override with `SIGN_IDENTITY=...`.
+
+Choose **Launch at Login** in the menu to enable or disable automatic startup. Install rook in `/Applications` first (`make install`), since macOS registers the app at its current path. If approval is needed, rook opens Login Items settings and shows a reminder in its menu.
 
 ## Config
 
@@ -96,6 +98,12 @@ open -g rook://reload                 # reload the config
 ```
 
 To see what rook is doing: `log stream --predicate 'subsystem == "dev.maskedsyntax.rook"'`.
+
+## Releasing
+
+`make release` builds a universal app signed with Developer ID into `build/Rook-<version>.zip`. `make notarize` also notarizes and staples it, and prints the sha256 for `packaging/rook.rb` (the Homebrew cask). Before the first notarization, run `xcrun notarytool store-credentials rook --apple-id <you> --team-id <TEAM>` once.
+
+After notarization, upload the ZIP to a GitHub release tagged `v<version>`, update the cask version and checksum, and copy `packaging/rook.rb` to `Casks/rook.rb` in your Homebrew tap. The checked-in cask is a template until its checksum is replaced and the release URL exists.
 
 ## Default shortcuts
 
